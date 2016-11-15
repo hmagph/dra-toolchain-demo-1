@@ -70,7 +70,7 @@ stages:
     value: master
     type: text
   jobs:
-  - name: Deploy
+  - name: Blue/Green Deploy
     type: deployer
     target:
       region_id: ${DEV_REGION_ID}
@@ -79,9 +79,25 @@ stages:
       application: ${CF_APP_NAME}
     script: |
       #!/bin/bash
-      # Push app
       export CF_APP_NAME="dev-$CF_APP"
-      cf push "${CF_APP_NAME}" -n ${CF_APP_NAME}
+      if ! cf app $CF_APP_NAME; then
+        cf push "${CF_APP_NAME}" -n ${CF_APP_NAME}
+      else
+        OLD_CF_APP_NAME=${CF_APP_NAME}-OLD-$(date +"%s")
+        rollback() {
+          set +e
+          if cf app $OLD_CF_APP_NAME; then
+            cf logs $CF_APP_NAME --recent
+            cf delete $CF_APP_NAME -f
+            cf rename $OLD_CF_APP_NAME $CF_APP_NAME
+          fi
+          exit 1
+        }
+        set -e
+        trap rollback ERR
+        cf rename $CF_APP_NAME $OLD_CF_APP_NAME
+        cf push $CF_APP_NAME
+        cf delete $OLD_CF_APP_NAME -f
+      fi      
       export APP_URL=http://$(cf app $CF_APP_NAME | grep urls: | awk '{print $2}')
-      # View logs
-      #cf logs "${CF_APP_NAME}" --recent
+      
